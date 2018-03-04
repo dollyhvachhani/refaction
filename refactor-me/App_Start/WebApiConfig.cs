@@ -1,4 +1,5 @@
-﻿using System.Web.Http;
+﻿using refactor_me.ActionFilter;
+using System.Web.Http;
 
 namespace refactor_me
 {
@@ -19,6 +20,7 @@ namespace refactor_me
                 routeTemplate: "api/{controller}/{id}",
                 defaults: new { id = RouteParameter.Optional }
             );
+            config.Filters.Add(new LoggingFilterAttribute());
         }
     }
 }

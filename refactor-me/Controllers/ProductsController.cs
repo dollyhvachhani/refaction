@@ -1,115 +1,191 @@
 ﻿using System;
 using System.Net;
 using System.Web.Http;
-using refactor_me.Models;
+using BusinessAccessLayer;
+using System.Net.Http;
+using BusinessAccessLayer.Entities;
+using System.Linq;
+using System.Collections.Generic;
+using refactor_me.Filters;
+using refactor_me.ErrorHelper;
+//using AttributeRouting.Web.Http;
 
 namespace refactor_me.Controllers
 {
+    [ApiAuthenticationFilter]
     [RoutePrefix("products")]
     public class ProductsController : ApiController
     {
-        [Route]
-        [HttpGet]
-        public Products GetAll()
+        #region private member variables
+        private readonly IProductService _productServices;
+        #endregion
+        #region Public Constructor
+        /// <summary>
+        /// Public constructor to initialize product service instance
+        /// </summary>
+        public ProductsController(IProductService productService)
         {
-            return new Products();
+            _productServices = productService;
         }
 
+        #endregion
         [Route]
+        [Route("allproducts")]
         [HttpGet]
-        public Products SearchByName(string name)
+        public HttpResponseMessage Get()
         {
-            return new Products(name);
+            var products = _productServices.GetAllProducts();
+            if (products != null)
+            {
+                var productEntities = products as List<ProductEntity> ?? products.ToList();
+                if (productEntities.Any())
+                    return Request.CreateResponse(HttpStatusCode.OK, productEntities);
+            }
+            throw new ApiDataException(1000, "Products not found", HttpStatusCode.NotFound);
         }
 
-        [Route("{id}")]
+        [Route("productname/{name}")]
         [HttpGet]
-        public Product GetProduct(Guid id)
+        public HttpResponseMessage SearchByName(string name)
         {
-            var product = new Product(id);
-            if (product.IsNew)
-                throw new HttpResponseException(HttpStatusCode.NotFound);
+            var product = _productServices.GetProductByName(name);
+            if (product != null)
+                return Request.CreateResponse(HttpStatusCode.OK, product);
+            return Request.CreateErrorResponse(HttpStatusCode.NotFound, "No product found for this name");
+        }
 
-            return product;
+        [Route("productid/{id}")]
+        [HttpGet]
+        public HttpResponseMessage Get(Guid id)
+        {
+            if (id != null)
+            {
+                var product = _productServices.GetProductById(id);
+                if (product != null)
+                    return Request.CreateResponse(HttpStatusCode.OK, product);
+                throw new ApiDataException(1001, "No product found for this id.", HttpStatusCode.NotFound);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route]
         [HttpPost]
-        public void Create(Product product)
+        public HttpResponseMessage Create([FromBody] ProductEntity productEntity)
         {
-            product.Save();
+            if (productEntity != null)
+            {
+                var id = _productServices.AddProduct(productEntity);
+                if (id != null)
+                    return Request.CreateResponse(HttpStatusCode.OK, id);
+                throw new ApiDataException(1001, "Unable to create new product", HttpStatusCode.InternalServerError);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{id}")]
         [HttpPut]
-        public void Update(Guid id, Product product)
+        public bool Update(Guid id, [FromBody]ProductEntity productEntity)
         {
-            var orig = new Product(id)
+            if (id != null)
             {
-                Name = product.Name,
-                Description = product.Description,
-                Price = product.Price,
-                DeliveryPrice = product.DeliveryPrice
-            };
-
-            if (!orig.IsNew)
-                orig.Save();
+                var isSuccess = _productServices.UpdateProduct(id, productEntity);
+                if (isSuccess)
+                    return true;
+                throw new ApiDataException(1002, "Unable to update product", HttpStatusCode.NotModified);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{id}")]
         [HttpDelete]
-        public void Delete(Guid id)
+        public bool Delete(Guid id)
         {
-            var product = new Product(id);
-            product.Delete();
+            //check for product options before deleting a product
+            var productOptions = _productServices.GetProductOptionsByProductId(id);
+            if (productOptions != null)
+            {
+                _productServices.DeleteProductOptions(id);
+            }
+            if (id != null)
+            {
+                var isSuccess = _productServices.DeleteProduct(id);
+                if (isSuccess)
+                    return true;
+                throw new ApiDataException(1002, "Product is already deleted or not exist in system.", HttpStatusCode.NoContent);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{productId}/options")]
         [HttpGet]
-        public ProductOptions GetOptions(Guid productId)
+        public HttpResponseMessage GetOptions(Guid productId)
         {
-            return new ProductOptions(productId);
+            var productOptions = _productServices.GetProductOptionsByProductId(productId).ToList();
+            if (productOptions != null)
+            {
+                var productOptionEntities = productOptions as List<ProductOptionEntity> ?? productOptions.ToList();
+                if (productOptionEntities.Any())
+                    return Request.CreateResponse(HttpStatusCode.OK, productOptionEntities);
+                throw new ApiDataException(1001, "No product found for this id.", HttpStatusCode.NotFound);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{productId}/options/{id}")]
         [HttpGet]
-        public ProductOption GetOption(Guid productId, Guid id)
+        public HttpResponseMessage GetOption(Guid id)
         {
-            var option = new ProductOption(id);
-            if (option.IsNew)
-                throw new HttpResponseException(HttpStatusCode.NotFound);
-
-            return option;
+            var productOptions = _productServices.GetOptionIdByProductId(id);
+            if (productOptions != null)
+            {
+                var productOptionEntities = productOptions as ProductOptionEntity ?? productOptions;
+                if (productOptionEntities != null)
+                    return Request.CreateResponse(HttpStatusCode.OK, productOptionEntities);
+                throw new ApiDataException(1001, "No product found for this id.", HttpStatusCode.NotFound);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{productId}/options")]
         [HttpPost]
-        public void CreateOption(Guid productId, ProductOption option)
+        public HttpResponseMessage CreateOption(Guid productId, [FromBody] ProductOptionEntity productOptionEntity)
         {
-            option.ProductId = productId;
-            option.Save();
+            if (productOptionEntity != null)
+            {
+                var id = _productServices.AddProductOption(productOptionEntity, productId);
+                if (id != null)
+                    return Request.CreateResponse(HttpStatusCode.OK, id);
+                throw new ApiDataException(1001, "Unable to create new product", HttpStatusCode.InternalServerError);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{productId}/options/{id}")]
         [HttpPut]
-        public void UpdateOption(Guid id, ProductOption option)
+        public bool UpdateOption(Guid id, [FromBody] ProductOptionEntity productOptionEntity)
         {
-            var orig = new ProductOption(id)
+            if (id != null)
             {
-                Name = option.Name,
-                Description = option.Description
-            };
-
-            if (!orig.IsNew)
-                orig.Save();
+                var isSuccess = _productServices.UpdateProductOption(id, productOptionEntity);
+                if (isSuccess)
+                    return true;
+                throw new ApiDataException(1002, "Unable to update product", HttpStatusCode.NotModified);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
 
         [Route("{productId}/options/{id}")]
         [HttpDelete]
-        public void DeleteOption(Guid id)
+        public bool DeleteOption(Guid id)
         {
-            var opt = new ProductOption(id);
-            opt.Delete();
+            if (id != null)
+            {
+                var isSuccess = _productServices.DeleteProductOption(id);
+                if (isSuccess)
+                    return true;
+                throw new ApiDataException(1002, "Product is already deleted or not exist in system.", HttpStatusCode.NoContent);
+            }
+            throw new ApiException() { ErrorCode = (int)HttpStatusCode.BadRequest, ErrorDescription = "Bad Request..." };
         }
     }
 }
